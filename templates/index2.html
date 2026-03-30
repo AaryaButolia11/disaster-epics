@@ -1,0 +1,2264 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>SDRRAS - Smart Disaster Response System</title>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.css" />
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.11.0/dist/tf.min.js"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@700;900&family=DM+Sans:wght@300;400;500;600&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet" />
+
+  <style>
+    /* ================================================================
+       RESET & GLOBALS
+    ================================================================ */
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    html, body { height: 100%; }
+
+    body {
+      font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
+      background: #1a1a1a;
+      height: 100vh;
+      overflow: hidden;
+    }
+
+    /* ================================================================
+       VIEW SYSTEM — homepage vs disaster pages
+    ================================================================ */
+    .view {
+      position: fixed;
+      inset: 0;
+      transition: transform 0.45s cubic-bezier(0.4,0,0.2,1), opacity 0.45s ease;
+      will-change: transform, opacity;
+    }
+
+    /* Homepage sits in place */
+    #view-home {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 10px;
+      background: #1a1a1a;
+      overflow: hidden;
+    }
+
+    /* Disaster views start off-screen below */
+    .view-disaster {
+      transform: translateY(100%);
+      opacity: 0;
+      pointer-events: none;
+      background: #0d0d0d;
+      overflow-y: auto;
+    }
+
+    /* Active disaster view slides up */
+    .view-disaster.active {
+      transform: translateY(0);
+      opacity: 1;
+      pointer-events: all;
+    }
+
+    /* Home fades out when a disaster is open */
+    #view-home.hidden {
+      opacity: 0;
+      pointer-events: none;
+    }
+
+    /* ================================================================
+       HOMEPAGE STYLES
+    ================================================================ */
+    .container {
+      background: #ffffff;
+      border-radius: 4px;
+      border: 3px solid #d32f2f;
+      box-shadow: 0 8px 32px rgba(0,0,0,0.4);
+      max-width: 1200px;
+      width: 100%;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+      height: calc(100vh - 20px);
+    }
+
+    .emergency-header {
+      background: linear-gradient(180deg, #d32f2f 0%, #b71c1c 100%);
+      color: white;
+      padding: 8px 16px 10px;
+      text-align: center;
+      border-bottom: 3px solid #8b0000;
+      position: relative;
+      flex-shrink: 0;
+    }
+
+    .emergency-stripe {
+      position: absolute;
+      top: 0; left: 0; right: 0;
+      height: 5px;
+      background: repeating-linear-gradient(45deg, #ffeb3b, #ffeb3b 14px, #000 14px, #000 28px);
+    }
+
+    .home-alert-banner {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 10px;
+      padding: 6px 12px;
+      background: #fff3cd;
+      border-left: 5px solid #ff9800;
+      border-right: 5px solid #ff9800;
+      margin-top: 6px;
+    }
+
+    .home-alert-icon {
+      font-size: 18px;
+      animation: homePulse 1.5s infinite;
+    }
+
+    @keyframes homePulse {
+      0%,100% { transform: scale(1); opacity: 1; }
+      50%      { transform: scale(1.15); opacity: 0.8; }
+    }
+
+    .home-alert-text {
+      font-size: 13px;
+      font-weight: 700;
+      color: #e65100;
+      text-transform: uppercase;
+      letter-spacing: 1.5px;
+    }
+
+    .system-title {
+      margin-top: 6px;
+      font-size: 10px;
+      font-weight: 600;
+      letter-spacing: 2.5px;
+      text-transform: uppercase;
+      opacity: 0.95;
+    }
+
+    .system-name {
+      font-size: 18px;
+      font-weight: 700;
+      margin: 3px 0;
+      letter-spacing: 1px;
+    }
+
+    .main-content {
+      padding: 12px 16px;
+      background: #f5f5f5;
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+
+    .control-panel {
+      display: grid;
+      grid-template-columns: 2fr 1fr 1fr;
+      gap: 12px;
+      margin-bottom: 12px;
+      flex-shrink: 0;
+    }
+
+    .panel-card {
+      background: white;
+      border: 2px solid #424242;
+      border-radius: 2px;
+      padding: 10px 12px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+    }
+
+    .panel-header {
+      font-size: 10px;
+      font-weight: 700;
+      margin-bottom: 8px;
+      color: #212121;
+      text-align: center;
+      letter-spacing: 2px;
+      text-transform: uppercase;
+      padding-bottom: 6px;
+      border-bottom: 2px solid #e0e0e0;
+    }
+
+    .alert-item {
+      margin: 6px 0;
+      padding: 7px 10px;
+      background: #ffebee;
+      border-left: 4px solid #d32f2f;
+      border-radius: 2px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .alert-severity {
+      background: #d32f2f;
+      color: white;
+      padding: 3px 8px;
+      border-radius: 2px;
+      font-size: 10px;
+      font-weight: 700;
+      text-transform: uppercase;
+    }
+
+    .alert-location {
+      flex: 1;
+      font-size: 12px;
+      font-weight: 600;
+      color: #424242;
+    }
+
+    .action-button {
+      width: 100%;
+      padding: 8px;
+      background: #424242;
+      color: white;
+      border: none;
+      border-radius: 2px;
+      font-size: 11px;
+      font-weight: 700;
+      cursor: pointer;
+      transition: all 0.2s ease;
+      margin-bottom: 6px;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+    }
+
+    .action-button:last-child { margin-bottom: 0; }
+    .action-button:hover { background: #212121; box-shadow: 0 4px 12px rgba(0,0,0,0.3); }
+    .action-button.primary { background: #1976d2; }
+    .action-button.primary:hover { background: #0d47a1; }
+    .action-button.warning { background: #f57c00; }
+    .action-button.warning:hover { background: #e65100; }
+
+    .input-field {
+      width: 100%;
+      padding: 6px 8px;
+      border: 2px solid #bdbdbd;
+      border-radius: 2px;
+      font-size: 11px;
+      margin-bottom: 6px;
+      transition: border-color 0.2s;
+      font-family: inherit;
+    }
+
+    .input-field:focus { outline: none; border-color: #1976d2; }
+    .input-label {
+      display: block;
+      font-size: 10px;
+      font-weight: 600;
+      color: #616161;
+      margin-bottom: 3px;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+    }
+
+    .disaster-grid {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 12px;
+      flex: 1;
+    }
+
+    .disaster-module {
+      background: white;
+      border: 2px solid #424242;
+      border-radius: 2px;
+      text-align: center;
+      cursor: pointer;
+      transition: all 0.2s ease;
+      position: relative;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+    }
+
+    .disaster-module:hover {
+      transform: translateY(-3px);
+      box-shadow: 0 6px 20px rgba(0,0,0,0.15);
+      border-color: #1976d2;
+    }
+
+    .disaster-module::before {
+      content: "";
+      position: absolute;
+      top: 0; left: 0; right: 0;
+      height: 4px;
+      background: #d32f2f;
+    }
+
+    .disaster-icon { font-size: 36px; filter: grayscale(20%); }
+
+    .disaster-label {
+      color: #212121;
+      font-size: 13px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+    }
+
+    .emergency-actions {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      border-top: 3px solid #424242;
+      flex-shrink: 0;
+    }
+
+    .emergency-btn {
+      padding: 12px;
+      font-size: 13px;
+      font-weight: 700;
+      border: none;
+      cursor: pointer;
+      transition: all 0.2s ease;
+      text-transform: uppercase;
+      letter-spacing: 1.5px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+    }
+
+    .emergency-btn.contact { background: white; color: #212121; border-right: 3px solid #424242; }
+    .emergency-btn.contact:hover { background: #f5f5f5; }
+    .emergency-btn.donate { background: #d32f2f; color: white; }
+    .emergency-btn.donate:hover { background: #b71c1c; }
+    .btn-icon { font-size: 18px; }
+
+    /* Modals */
+    .modal {
+      display: none;
+      position: fixed;
+      z-index: 9000;
+      left: 0; top: 0;
+      width: 100%; height: 100%;
+      background-color: rgba(0,0,0,0.75);
+    }
+
+    .modal-content {
+      background: white;
+      margin: 3% auto;
+      padding: 0;
+      border-radius: 2px;
+      width: 90%;
+      max-width: 520px;
+      box-shadow: 0 10px 40px rgba(0,0,0,0.5);
+      max-height: 90vh;
+      overflow-y: auto;
+      border: 3px solid #424242;
+    }
+
+    .modal-header {
+      background: #424242;
+      color: white;
+      padding: 20px 25px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      border-bottom: 3px solid #212121;
+    }
+
+    .modal-title { font-size: 20px; font-weight: 700; text-transform: uppercase; letter-spacing: 2px; }
+
+    .close {
+      color: white;
+      font-size: 32px;
+      font-weight: bold;
+      cursor: pointer;
+      line-height: 1;
+      transition: color 0.2s;
+    }
+
+    .close:hover { color: #d32f2f; }
+    .modal-body { padding: 25px; }
+
+    .form-group { margin-bottom: 20px; }
+
+    .form-group label {
+      display: block;
+      margin-bottom: 8px;
+      font-weight: 700;
+      color: #212121;
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+    }
+
+    .form-group input, .form-group select {
+      width: 100%;
+      padding: 12px;
+      border: 2px solid #bdbdbd;
+      border-radius: 2px;
+      font-size: 14px;
+      transition: all 0.2s;
+      font-family: inherit;
+    }
+
+    .form-group input:focus, .form-group select:focus {
+      outline: none;
+      border-color: #1976d2;
+      box-shadow: 0 0 0 3px rgba(25,118,210,0.1);
+    }
+
+    .submit-btn {
+      width: 100%;
+      padding: 16px;
+      background: #1976d2;
+      color: white;
+      border: none;
+      border-radius: 2px;
+      font-size: 14px;
+      font-weight: 700;
+      cursor: pointer;
+      transition: all 0.2s;
+      text-transform: uppercase;
+      letter-spacing: 2px;
+    }
+
+    .submit-btn:hover { background: #0d47a1; box-shadow: 0 4px 12px rgba(25,118,210,0.4); }
+    .submit-btn.danger { background: #d32f2f; }
+    .submit-btn.danger:hover { background: #b71c1c; }
+
+    .notification {
+      position: fixed;
+      top: 20px;
+      right: 20px;
+      background: #2e7d32;
+      color: white;
+      padding: 16px 24px;
+      border-radius: 2px;
+      box-shadow: 0 4px 16px rgba(0,0,0,0.3);
+      z-index: 99999;
+      display: none;
+      font-weight: 600;
+      border-left: 6px solid #1b5e20;
+    }
+
+    .notification.show { display: block; animation: notifSlideIn 0.3s ease; }
+    .notification.error { background: #c62828; border-left-color: #8b0000; }
+
+    @keyframes notifSlideIn {
+      from { opacity: 0; transform: translateX(100px); }
+      to   { opacity: 1; transform: translateX(0); }
+    }
+
+    .category-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 15px; }
+
+    .category-btn {
+      padding: 25px 20px;
+      border: 2px solid #bdbdbd;
+      background: white;
+      border-radius: 2px;
+      cursor: pointer;
+      transition: all 0.2s;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .category-btn:hover { border-color: #1976d2; box-shadow: 0 4px 12px rgba(0,0,0,0.1); }
+    .category-btn.active { border-color: #1976d2; background: #e3f2fd; border-width: 3px; }
+    .cat-icon { font-size: 36px; }
+    .cat-label { font-weight: 700; color: #212121; font-size: 14px; text-transform: uppercase; letter-spacing: 1px; }
+    .hidden { display: none !important; }
+
+    .request-list-item {
+      background: #fafafa;
+      border: 2px solid #e0e0e0;
+      border-left: 4px solid #1976d2;
+      border-radius: 2px;
+      padding: 18px;
+      margin-bottom: 15px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .request-info h4 { color: #212121; font-size: 15px; margin-bottom: 6px; font-weight: 700; }
+    .request-meta { font-size: 12px; color: #757575; font-weight: 600; }
+
+    .fulfill-btn {
+      background: #2e7d32;
+      color: white;
+      border: none;
+      padding: 10px 18px;
+      border-radius: 2px;
+      font-size: 12px;
+      font-weight: 700;
+      cursor: pointer;
+      transition: all 0.2s;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+    }
+
+    .fulfill-btn:hover { background: #1b5e20; }
+    .empty-state { text-align: center; color: #9e9e9e; padding: 30px; font-weight: 600; font-size: 14px; }
+
+    .donation-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-bottom: 8px; }
+
+    .amount-btn {
+      padding: 16px;
+      border: 2px solid #bdbdbd;
+      background: white;
+      border-radius: 2px;
+      cursor: pointer;
+      font-weight: 700;
+      color: #212121;
+      transition: all 0.2s;
+      font-size: 16px;
+    }
+
+    .amount-btn:hover { border-color: #d32f2f; color: #d32f2f; }
+    .amount-btn.selected { background: #d32f2f; color: white; border-color: #b71c1c; transform: scale(1.05); }
+    .info-text { text-align: center; color: #757575; font-size: 13px; margin-bottom: 20px; font-weight: 500; }
+
+    /* Dev banner */
+    #devBanner {
+      display: none;
+      position: fixed;
+      top: 0; left: 0; width: 100%;
+      background: #28a745;
+      color: white;
+      text-align: center;
+      padding: 12px;
+      font-weight: bold;
+      z-index: 99999;
+    }
+
+    /* ================================================================
+       DISASTER MODULE SHARED STYLES (namespaced via .ds-* classes)
+    ================================================================ */
+    :root {
+      --ds-bg: #0d0d0d;
+      --ds-surface: #141414;
+      --ds-surface2: #1a1a1a;
+      --ds-border: #2a2a2a;
+      --ds-border-light: #333;
+      --ds-text: #f0ede8;
+      --ds-text-muted: #888;
+      --ds-text-dim: #555;
+      --ds-accent: #e8d5b0;
+      --ds-accent-dim: rgba(232,213,176,0.1);
+      --ds-red: #c0392b;
+      --ds-red-dim: rgba(192,57,43,0.12);
+      --ds-amber: #d4891a;
+      --ds-amber-dim: rgba(212,137,26,0.12);
+      --ds-green: #27ae60;
+      --ds-green-dim: rgba(39,174,96,0.12);
+    }
+
+    .ds-topbar {
+      border-bottom: 1px solid var(--ds-border);
+      padding: 0 40px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      height: 56px;
+      position: sticky;
+      top: 0;
+      background: rgba(13,13,13,0.95);
+      backdrop-filter: blur(12px);
+      z-index: 100;
+      flex-shrink: 0;
+    }
+
+    .ds-topbar-left { display: flex; align-items: center; gap: 24px; }
+
+    .ds-back-btn {
+      background: none;
+      border: none;
+      color: var(--ds-text-muted);
+      font-size: 13px;
+      font-weight: 500;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      transition: color 0.2s;
+      font-family: 'DM Sans', sans-serif;
+    }
+
+    .ds-back-btn:hover { color: var(--ds-text); }
+
+    .ds-divider-v { width: 1px; height: 18px; background: var(--ds-border-light); }
+
+    .ds-brand {
+      font-family: 'DM Mono', monospace;
+      font-size: 12px;
+      color: var(--ds-text-dim);
+      letter-spacing: 2px;
+      text-transform: uppercase;
+    }
+
+    .ds-topbar-right { display: flex; align-items: center; gap: 8px; }
+
+    .ds-live-dot {
+      width: 7px; height: 7px;
+      border-radius: 50%;
+      animation: ds-pulse-dot 2s infinite;
+    }
+
+    @keyframes ds-pulse-dot { 0%,100% { opacity:1; } 50% { opacity:0.3; } }
+
+    .ds-live-label {
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: 1.5px;
+      text-transform: uppercase;
+    }
+
+    .ds-page {
+      max-width: 1100px;
+      margin: 0 auto;
+      padding: 50px 24px 60px;
+      font-family: 'DM Sans', sans-serif;
+      color: var(--ds-text);
+      line-height: 1.6;
+    }
+
+    .ds-masthead {
+      border-bottom: 3px double var(--ds-border-light);
+      padding-bottom: 24px;
+      margin-bottom: 32px;
+      text-align: center;
+    }
+
+    .ds-masthead-tag {
+      font-family: 'DM Mono', monospace;
+      font-size: 10px;
+      letter-spacing: 3px;
+      text-transform: uppercase;
+      color: var(--ds-text-dim);
+      margin-bottom: 12px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 12px;
+    }
+
+    .ds-masthead-tag::before, .ds-masthead-tag::after {
+      content: '';
+      display: block;
+      width: 40px;
+      height: 1px;
+      background: var(--ds-border-light);
+    }
+
+    .ds-masthead h1 {
+      font-family: 'Playfair Display', serif;
+      font-size: clamp(2.2rem, 5vw, 3.6rem);
+      font-weight: 900;
+      color: var(--ds-text);
+      letter-spacing: -1px;
+      line-height: 1.1;
+      margin-bottom: 10px;
+    }
+
+    .ds-masthead h1 span { color: var(--ds-accent); }
+
+    .ds-masthead-sub {
+      font-size: 14px;
+      color: var(--ds-text-muted);
+      font-weight: 300;
+      max-width: 520px;
+      margin: 0 auto;
+    }
+
+    .ds-tabs {
+      display: flex;
+      gap: 4px;
+      background: var(--ds-surface);
+      border: 1px solid var(--ds-border);
+      border-radius: 2px;
+      padding: 6px;
+      margin-bottom: 24px;
+    }
+
+    .ds-tab-btn {
+      flex: 1;
+      padding: 10px 18px;
+      background: transparent;
+      border: 1px solid transparent;
+      border-radius: 2px;
+      cursor: pointer;
+      font-family: 'DM Sans', sans-serif;
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--ds-text-muted);
+      transition: all 0.2s;
+    }
+
+    .ds-tab-btn:hover { color: var(--ds-text); border-color: var(--ds-border-light); }
+    .ds-tab-btn.active { background: var(--ds-accent); color: #0d0d0d; border-color: var(--ds-accent); }
+
+    .ds-tab-content { display: none; }
+    .ds-tab-content.active { display: block; }
+
+    .ds-card {
+      background: var(--ds-surface);
+      border: 1px solid var(--ds-border);
+      border-radius: 2px;
+      padding: 24px;
+      margin-bottom: 18px;
+    }
+
+    .ds-card-title {
+      font-family: 'DM Mono', monospace;
+      font-size: 10px;
+      letter-spacing: 2px;
+      text-transform: uppercase;
+      color: var(--ds-text-dim);
+      margin-bottom: 18px;
+      padding-bottom: 12px;
+      border-bottom: 1px solid var(--ds-border);
+    }
+
+    .ds-search-row { display: flex; gap: 10px; }
+
+    .ds-search-input {
+      flex: 1;
+      padding: 11px 14px;
+      background: var(--ds-surface2);
+      border: 1px solid var(--ds-border-light);
+      border-radius: 2px;
+      font-family: 'DM Sans', sans-serif;
+      font-size: 14px;
+      color: var(--ds-text);
+      transition: border-color 0.2s;
+    }
+
+    .ds-search-input::placeholder { color: var(--ds-text-dim); }
+    .ds-search-input:focus { outline: none; }
+
+    .ds-btn-primary {
+      padding: 11px 24px;
+      background: var(--ds-accent);
+      color: #0d0d0d;
+      border: none;
+      border-radius: 2px;
+      font-family: 'DM Sans', sans-serif;
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.2s;
+      white-space: nowrap;
+    }
+
+    .ds-btn-primary:hover:not(:disabled) { background: #f0e0bb; transform: translateY(-1px); }
+    .ds-btn-primary:disabled { opacity: 0.4; cursor: not-allowed; transform: none; }
+
+    .ds-alert-banner {
+      border-radius: 2px;
+      padding: 14px 18px;
+      margin-bottom: 18px;
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      border-left: 4px solid var(--ds-red);
+      background: var(--ds-red-dim);
+      animation: ds-blink 2s ease-in-out infinite;
+    }
+
+    @keyframes ds-blink { 0%,100% { opacity:1; } 50% { opacity:0.75; } }
+
+    .ds-alert-banner .ds-alert-icon { font-size: 1.4rem; flex-shrink: 0; }
+    .ds-alert-banner strong { display: block; color: #e05c4a; font-size: 11px; font-weight: 700; letter-spacing: 1.5px; text-transform: uppercase; margin-bottom: 2px; }
+    .ds-alert-banner p { font-size: 12px; color: var(--ds-text-muted); }
+
+    .ds-main-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 18px;
+      margin-bottom: 18px;
+    }
+
+    .ds-params-grid {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 8px;
+      margin-bottom: 14px;
+    }
+
+    .ds-param-box {
+      background: var(--ds-surface2);
+      padding: 12px 14px;
+      border-radius: 2px;
+      border-left: 3px solid #3498db;
+      transition: all 0.2s;
+    }
+
+    .ds-param-box:hover { transform: translateX(3px); border-left-color: var(--ds-accent); }
+
+    .ds-param-label {
+      font-family: 'DM Mono', monospace;
+      font-size: 9px;
+      color: var(--ds-text-dim);
+      letter-spacing: 1px;
+      text-transform: uppercase;
+      margin-bottom: 5px;
+    }
+
+    .ds-param-value {
+      font-family: 'Playfair Display', serif;
+      font-size: 20px;
+      color: var(--ds-text);
+      font-weight: 700;
+    }
+
+    .ds-param-unit {
+      font-family: 'DM Mono', monospace;
+      font-size: 11px;
+      color: var(--ds-text-muted);
+      margin-left: 3px;
+    }
+
+    .ds-risk-indicator {
+      padding: 12px 16px;
+      border-radius: 2px;
+      font-weight: 600;
+      font-size: 13px;
+      text-align: center;
+      margin-top: 4px;
+    }
+
+    .ds-risk-low    { background: var(--ds-green-dim); color: #4fd98e; border: 1px solid rgba(39,174,96,0.3); }
+    .ds-risk-medium { background: var(--ds-amber-dim); color: #f0a830; border: 1px solid rgba(212,137,26,0.3); }
+    .ds-risk-high   { background: rgba(230,126,34,0.12); color: #f09050; border: 1px solid rgba(230,126,34,0.3); }
+    .ds-risk-extreme { background: var(--ds-red-dim); color: #e05c4a; border: 1px solid rgba(192,57,43,0.3); }
+
+    .ds-map {
+      height: 340px;
+      width: 100%;
+      border-radius: 2px;
+      overflow: hidden;
+      background: var(--ds-surface2);
+      border: 1px solid var(--ds-border);
+      filter: grayscale(30%) brightness(0.85);
+    }
+
+    .ds-loading {
+      text-align: center;
+      padding: 40px;
+      color: var(--ds-text-muted);
+      font-size: 14px;
+      display: none;
+    }
+
+    .ds-spinner {
+      border: 3px solid var(--ds-border-light);
+      border-top: 3px solid var(--ds-accent);
+      border-radius: 50%;
+      width: 32px; height: 32px;
+      animation: ds-spin 0.9s linear infinite;
+      margin: 0 auto 14px;
+    }
+
+    @keyframes ds-spin { to { transform: rotate(360deg); } }
+
+    .ds-error-message {
+      background: var(--ds-red-dim);
+      border: 1px solid rgba(192,57,43,0.3);
+      border-left: 4px solid var(--ds-red);
+      color: #e05c4a;
+      padding: 12px 16px;
+      border-radius: 2px;
+      margin: 14px 0;
+      font-size: 13px;
+    }
+
+    .ds-training-status {
+      background: var(--ds-surface2);
+      border: 1px solid var(--ds-border);
+      border-radius: 2px;
+      padding: 18px;
+      margin-bottom: 20px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 20px;
+      flex-wrap: wrap;
+    }
+
+    .ds-model-status strong {
+      font-family: 'DM Mono', monospace;
+      font-size: 10px;
+      letter-spacing: 2px;
+      text-transform: uppercase;
+      color: var(--ds-text-dim);
+      display: block;
+      margin-bottom: 4px;
+    }
+
+    .ds-model-status span {
+      font-family: 'DM Mono', monospace;
+      font-size: 13px;
+      color: var(--ds-accent);
+    }
+
+    .ds-progress-wrap { flex: 1; min-width: 200px; display: none; }
+
+    .ds-progress-track {
+      height: 4px;
+      background: var(--ds-border);
+      border-radius: 2px;
+      overflow: hidden;
+      margin-top: 8px;
+    }
+
+    .ds-progress-bar {
+      height: 100%;
+      background: var(--ds-accent);
+      width: 0%;
+      transition: width 0.3s;
+      border-radius: 2px;
+    }
+
+    .ds-input-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 14px;
+      margin-bottom: 18px;
+    }
+
+    .ds-input-group label {
+      display: block;
+      font-family: 'DM Mono', monospace;
+      font-size: 9px;
+      letter-spacing: 1.5px;
+      text-transform: uppercase;
+      color: var(--ds-text-dim);
+      margin-bottom: 6px;
+    }
+
+    .ds-input-group input, .ds-input-group select {
+      width: 100%;
+      padding: 10px 12px;
+      background: var(--ds-surface2);
+      border: 1px solid var(--ds-border-light);
+      border-radius: 2px;
+      font-family: 'DM Mono', monospace;
+      font-size: 13px;
+      color: var(--ds-text);
+      transition: border-color 0.2s;
+      appearance: none;
+    }
+
+    .ds-input-group input:focus, .ds-input-group select:focus {
+      outline: none;
+      border-color: var(--ds-accent);
+      box-shadow: 0 0 0 3px var(--ds-accent-dim);
+    }
+
+    .ds-input-group select option { background: var(--ds-surface2); }
+
+    .ds-prediction-result {
+      border-radius: 2px;
+      padding: 28px;
+      margin-top: 18px;
+      color: white;
+      animation: ds-fadeUp 0.4s ease;
+    }
+
+    @keyframes ds-fadeUp {
+      from { opacity: 0; transform: translateY(10px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+
+    .ds-prediction-result h3 {
+      font-family: 'DM Mono', monospace;
+      font-size: 10px;
+      letter-spacing: 2.5px;
+      text-transform: uppercase;
+      opacity: 0.7;
+      margin-bottom: 14px;
+    }
+
+    .ds-pred-value {
+      font-family: 'Playfair Display', serif;
+      font-size: 64px;
+      font-weight: 900;
+      line-height: 1;
+      margin-bottom: 4px;
+    }
+
+    .ds-pred-unit {
+      font-family: 'DM Mono', monospace;
+      font-size: 10px;
+      letter-spacing: 2px;
+      opacity: 0.6;
+      margin-bottom: 12px;
+    }
+
+    .ds-pred-category { font-size: 20px; font-weight: 700; margin-bottom: 3px; }
+    .ds-pred-risk { font-size: 13px; opacity: 0.8; margin-bottom: 16px; }
+
+    .ds-pred-details {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 8px;
+      margin: 16px 0;
+    }
+
+    .ds-detail-box { background: rgba(0,0,0,0.2); padding: 10px 12px; border-radius: 2px; }
+
+    .ds-detail-label {
+      font-family: 'DM Mono', monospace;
+      font-size: 9px;
+      letter-spacing: 1px;
+      text-transform: uppercase;
+      opacity: 0.65;
+      margin-bottom: 4px;
+    }
+
+    .ds-detail-value { font-size: 16px; font-weight: 700; }
+
+    .ds-safety-advisory {
+      background: rgba(0,0,0,0.25);
+      border-radius: 2px;
+      padding: 14px 16px;
+      font-size: 12px;
+      line-height: 1.7;
+      margin-top: 4px;
+    }
+
+    .ds-safety-advisory strong {
+      display: block;
+      font-family: 'DM Mono', monospace;
+      font-size: 9px;
+      letter-spacing: 2px;
+      text-transform: uppercase;
+      opacity: 0.75;
+      margin-bottom: 5px;
+    }
+
+    .ds-page-footer {
+      margin-top: 40px;
+      padding-top: 20px;
+      border-top: 1px solid var(--ds-border);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      font-family: 'DM Mono', monospace;
+    }
+
+    .ds-footer-brand { font-size: 9px; letter-spacing: 2px; text-transform: uppercase; color: var(--ds-text-dim); }
+    .ds-footer-note { font-size: 10px; color: var(--ds-text-dim); }
+
+    /* Info banner */
+    .ds-info-banner {
+      border-radius: 2px;
+      padding: 12px 16px;
+      margin-bottom: 16px;
+      display: flex;
+      align-items: flex-start;
+      gap: 12px;
+      border-left: 4px solid #3498db;
+      background: rgba(52,152,219,0.12);
+      font-size: 12px;
+      color: var(--ds-text-muted);
+    }
+
+    .ds-info-banner strong {
+      display: block;
+      color: #3498db;
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: 1.5px;
+      text-transform: uppercase;
+      margin-bottom: 3px;
+    }
+
+    /* Earthquake events list */
+    .ds-events-list { display: flex; flex-direction: column; gap: 7px; }
+
+    .ds-event-item {
+      background: var(--ds-surface2);
+      border: 1px solid var(--ds-border);
+      border-radius: 2px;
+      padding: 10px 14px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      font-size: 12px;
+      border-left: 3px solid var(--ds-border-light);
+      transition: border-left-color 0.2s;
+    }
+
+    .ds-event-item:hover { border-left-color: var(--ds-accent); }
+
+    .ds-event-mag { font-family: 'Playfair Display', serif; font-size: 18px; font-weight: 700; min-width: 46px; }
+    .ds-mag-minor { color: #4fd98e; }
+    .ds-mag-light { color: var(--ds-accent); }
+    .ds-mag-moderate { color: #f0a830; }
+    .ds-mag-strong { color: #f09050; }
+    .ds-mag-major { color: #e05c4a; }
+    .ds-event-info { flex: 1; }
+    .ds-event-place { color: var(--ds-text); font-weight: 500; margin-bottom: 2px; }
+    .ds-event-time { font-family: 'DM Mono', monospace; font-size: 9px; color: var(--ds-text-dim); }
+    .ds-event-depth { font-family: 'DM Mono', monospace; font-size: 10px; color: var(--ds-text-muted); white-space: nowrap; }
+
+    /* Flood specific */
+    .ds-water-gauge { margin-bottom: 14px; }
+
+    .ds-gauge-label {
+      font-family: 'DM Mono', monospace;
+      font-size: 9px;
+      letter-spacing: 1.5px;
+      text-transform: uppercase;
+      color: var(--ds-text-dim);
+      margin-bottom: 8px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .ds-gauge-label span { font-size: 12px; color: #3fc6f0; letter-spacing: 0; }
+
+    .ds-gauge-track {
+      height: 10px;
+      background: var(--ds-border);
+      border-radius: 5px;
+      overflow: hidden;
+      margin-bottom: 5px;
+    }
+
+    .ds-gauge-fill {
+      height: 100%;
+      border-radius: 5px;
+      transition: width 1s ease;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .ds-gauge-fill::after {
+      content: '';
+      position: absolute;
+      top: 0; left: -100%;
+      width: 100%; height: 100%;
+      background: linear-gradient(90deg, transparent, rgba(255,255,255,0.3), transparent);
+      animation: ds-shimmer 2s infinite;
+    }
+
+    @keyframes ds-shimmer { to { left: 100%; } }
+
+    .ds-gauge-ticks {
+      display: flex;
+      justify-content: space-between;
+      font-family: 'DM Mono', monospace;
+      font-size: 8px;
+      color: var(--ds-text-dim);
+    }
+
+    /* Richter scale */
+    .ds-richter-scale { margin-bottom: 14px; }
+
+    .ds-richter-label {
+      font-family: 'DM Mono', monospace;
+      font-size: 9px;
+      letter-spacing: 1.5px;
+      text-transform: uppercase;
+      color: var(--ds-text-dim);
+      margin-bottom: 8px;
+    }
+
+    .ds-richter-track {
+      height: 8px;
+      background: var(--ds-border);
+      border-radius: 4px;
+      overflow: hidden;
+      margin-bottom: 5px;
+    }
+
+    .ds-richter-fill { height: 100%; border-radius: 4px; transition: width 0.8s ease; }
+
+    .ds-richter-ticks {
+      display: flex;
+      justify-content: space-between;
+      font-family: 'DM Mono', monospace;
+      font-size: 8px;
+      color: var(--ds-text-dim);
+    }
+
+    /* Flood feed */
+    .ds-feed-list { display: flex; flex-direction: column; gap: 7px; }
+
+    .ds-feed-item {
+      background: var(--ds-surface2);
+      border: 1px solid var(--ds-border);
+      border-radius: 2px;
+      padding: 12px 14px;
+      display: flex;
+      align-items: flex-start;
+      gap: 12px;
+      font-size: 12px;
+      border-left: 3px solid var(--ds-border-light);
+      transition: border-left-color 0.2s;
+    }
+
+    .ds-feed-item:hover { border-left-color: #3fc6f0; }
+
+    .ds-feed-severity {
+      font-family: 'DM Mono', monospace;
+      font-size: 9px;
+      font-weight: 700;
+      letter-spacing: 1px;
+      text-transform: uppercase;
+      padding: 3px 7px;
+      border-radius: 2px;
+      white-space: nowrap;
+      margin-top: 2px;
+    }
+
+    .ds-sev-minor    { background: var(--ds-green-dim); color: #4fd98e; border: 1px solid rgba(39,174,96,0.3); }
+    .ds-sev-moderate { background: var(--ds-amber-dim); color: #f0a830; border: 1px solid rgba(212,137,26,0.3); }
+    .ds-sev-severe   { background: rgba(41,128,185,0.12); color: #5ab4e8; border: 1px solid rgba(41,128,185,0.3); }
+    .ds-sev-extreme  { background: var(--ds-red-dim); color: #e05c4a; border: 1px solid rgba(192,57,43,0.3); }
+
+    .ds-feed-info { flex: 1; }
+    .ds-feed-title { color: var(--ds-text); font-weight: 500; margin-bottom: 3px; }
+    .ds-feed-meta { font-family: 'DM Mono', monospace; font-size: 9px; color: var(--ds-text-dim); }
+
+    @media (max-width: 768px) {
+      body { overflow: auto; }
+      .view { position: relative; }
+      .view-disaster { transform: none; opacity: 1; }
+      .container { height: auto; }
+      .control-panel { grid-template-columns: 1fr; }
+      .disaster-grid { grid-template-columns: repeat(2, 1fr); }
+      .emergency-actions { grid-template-columns: 1fr; }
+      .ds-main-grid, .ds-input-grid, .ds-pred-details { grid-template-columns: 1fr; }
+      .ds-params-grid { grid-template-columns: 1fr; }
+      .ds-search-row { flex-direction: column; }
+      .ds-topbar { padding: 0 16px; }
+      .ds-page { padding: 30px 16px 50px; }
+    }
+  </style>
+</head>
+<body>
+
+  <!-- ============================================================
+       DEV BANNER
+  ============================================================ -->
+  <div id="devBanner">🚧 This section is under development</div>
+
+  <!-- ============================================================
+       VIEW: HOMEPAGE
+  ============================================================ -->
+  <div class="view" id="view-home">
+    <div class="container">
+      <div class="emergency-header">
+        <div class="emergency-stripe"></div>
+        <div class="system-title">Government of India</div>
+        <div class="system-name">SDRRAS</div>
+        <div class="system-title">Smart Disaster Response &amp; Resource Allocation System</div>
+        <div class="home-alert-banner">
+          <span class="home-alert-icon">⚠️</span>
+          <span class="home-alert-text">Active Emergency: Flood in Bhopal</span>
+          <span class="home-alert-icon">⚠️</span>
+        </div>
+      </div>
+
+      <div class="main-content">
+        <div class="control-panel">
+          <div class="panel-card">
+            <h3 class="panel-header">Active Alerts</h3>
+            <div class="alert-item">
+              <span class="alert-severity">Critical</span>
+              <span class="alert-location">Flood in MP - Nagar District</span>
+            </div>
+          </div>
+
+          <div class="panel-card">
+            <h3 class="panel-header">Resource Management</h3>
+            <button class="action-button primary" id="openResourceBtn">📦 Request Resources</button>
+            <button class="action-button warning" id="matchBtn">🤝 Match Requests</button>
+          </div>
+
+          <div class="panel-card">
+            <h3 class="panel-header">Alert Subscription</h3>
+            <label class="input-label">Phone Number</label>
+            <input type="tel" class="input-field" placeholder="Enter phone number" id="phoneInput" />
+            <label class="input-label">Location/Area</label>
+            <input type="text" class="input-field" placeholder="Enter your area" id="areaInputSub" />
+            <button class="action-button" id="subscribeBtn">Subscribe</button>
+          </div>
+        </div>
+
+        <div class="disaster-grid">
+          <div class="disaster-module" data-type="flood">
+            <div class="disaster-icon">🌊</div>
+            <div class="disaster-label">Flood</div>
+          </div>
+          <div class="disaster-module" data-type="cyclone">
+            <div class="disaster-icon">🌀</div>
+            <div class="disaster-label">Cyclone</div>
+          </div>
+          <div class="disaster-module" data-type="earthquake">
+            <div class="disaster-icon">🏚️</div>
+            <div class="disaster-label">Earthquake</div>
+          </div>
+          <div class="disaster-module" data-type="fakenews">
+            <div class="disaster-icon">🔍</div>
+            <div class="disaster-label">Fake News</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="emergency-actions">
+        <button class="emergency-btn contact" id="chatBtn">
+          <span class="btn-icon">📞</span><span>Emergency Contact</span>
+        </button>
+        <button class="emergency-btn donate" id="donateBtn">
+          <span class="btn-icon">💰</span><span>Donate Now</span>
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============================================================
+       VIEW: CYCLONE
+  ============================================================ -->
+  <div class="view view-disaster" id="view-cyclone">
+    <nav class="ds-topbar">
+      <div class="ds-topbar-left">
+        <button class="ds-back-btn" onclick="goHome()">← Home</button>
+        <div class="ds-divider-v"></div>
+        <span class="ds-brand">SDRRAS</span>
+      </div>
+      <div class="ds-topbar-right">
+        <div class="ds-live-dot" style="background:#3498db"></div>
+        <span class="ds-live-label" style="color:#3498db">Live Feed</span>
+      </div>
+    </nav>
+
+    <div class="ds-page">
+      <div class="ds-masthead">
+        <div class="ds-masthead-tag">Disaster Monitoring</div>
+        <h1>Cyclone<span> Watch</span></h1>
+        <p class="ds-masthead-sub">Real-time weather monitoring and AI-powered intensity prediction for Indian coastal regions</p>
+      </div>
+
+      <div class="ds-tabs">
+        <button class="ds-tab-btn active" data-module="cy" data-tab="realtime">📡 Real-time Monitoring</button>
+        <button class="ds-tab-btn" data-module="cy" data-tab="prediction">🤖 AI Prediction</button>
+      </div>
+
+      <div id="cy-realtime-tab" class="ds-tab-content active">
+        <div class="ds-card">
+          <div class="ds-card-title">🔍 Track Location</div>
+          <div class="ds-search-row">
+            <input type="text" class="ds-search-input" id="cy-locationInput" placeholder="e.g. Mumbai, Chennai, Bay of Bengal" value="Mumbai" style="border-color:#333;"/>
+            <button class="ds-btn-primary" onclick="cy_fetchWeather()">Track Cyclone</button>
+          </div>
+        </div>
+        <div id="cy-alertContainer"></div>
+        <div id="cy-loadingIndicator" class="ds-loading"><div class="ds-spinner"></div><p>Fetching cyclone data...</p></div>
+        <div id="cy-errorContainer"></div>
+        <div class="ds-main-grid" id="cy-dataContainer" style="display:none">
+          <div class="ds-card">
+            <div class="ds-card-title">📊 Current Parameters</div>
+            <div class="ds-params-grid" id="cy-paramsGrid"></div>
+            <div id="cy-riskIndicator"></div>
+          </div>
+          <div class="ds-card">
+            <div class="ds-card-title">🗺️ Location Map</div>
+            <div id="cy-map" class="ds-map"></div>
+          </div>
+        </div>
+      </div>
+
+      <div id="cy-prediction-tab" class="ds-tab-content">
+        <div class="ds-card">
+          <div class="ds-card-title">🤖 AI-Powered Intensity Prediction</div>
+          <div class="ds-training-status">
+            <div class="ds-model-status"><strong>Model Status</strong><span id="cy-modelStatus">Ready to train</span></div>
+            <div class="ds-progress-wrap" id="cy-trainingProgress">
+              <div class="ds-model-status"><strong>Training Progress</strong></div>
+              <div class="ds-progress-track"><div class="ds-progress-bar" id="cy-progressBar"></div></div>
+            </div>
+            <button class="ds-btn-primary" id="cy-trainBtn">🎯 Train AI Model</button>
+          </div>
+          <div class="ds-input-grid">
+            <div class="ds-input-group"><label>Sea Surface Temp (°C)</label><input type="number" id="cy-sst" value="28.5" step="0.1" /></div>
+            <div class="ds-input-group"><label>Atmospheric Pressure (hPa)</label><input type="number" id="cy-pressure" value="1005" step="1" /></div>
+            <div class="ds-input-group"><label>Wind Speed (km/h)</label><input type="number" id="cy-windSpeed" value="45" step="1" /></div>
+            <div class="ds-input-group"><label>Humidity (%)</label><input type="number" id="cy-humidity" value="75" step="1" /></div>
+            <div class="ds-input-group"><label>Wind Shear (m/s)</label><input type="number" id="cy-windShear" value="8" step="0.1" /></div>
+            <div class="ds-input-group"><label>Vorticity (10⁻⁵ s⁻¹)</label><input type="number" id="cy-vorticity" value="15" step="0.1" /></div>
+          </div>
+          <button class="ds-btn-primary" id="cy-predictBtn" style="width:100%;padding:14px;font-size:14px;" disabled>🔮 Predict Cyclone Intensity (24h)</button>
+          <div id="cy-predictionResult" style="display:none"></div>
+        </div>
+      </div>
+
+      <div class="ds-page-footer">
+        <span class="ds-footer-brand">SDRRAS · Cyclone Watch</span>
+        <span class="ds-footer-note">Powered by OpenWeatherMap · TensorFlow.js · Results are advisory only</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============================================================
+       VIEW: EARTHQUAKE
+  ============================================================ -->
+  <div class="view view-disaster" id="view-earthquake">
+    <nav class="ds-topbar">
+      <div class="ds-topbar-left">
+        <button class="ds-back-btn" onclick="goHome()">← Home</button>
+        <div class="ds-divider-v"></div>
+        <span class="ds-brand">SDRRAS</span>
+      </div>
+      <div class="ds-topbar-right">
+        <div class="ds-live-dot" style="background:#e67e22"></div>
+        <span class="ds-live-label" style="color:#e67e22">Live Feed</span>
+      </div>
+    </nav>
+
+    <div class="ds-page">
+      <div class="ds-masthead">
+        <div class="ds-masthead-tag">Disaster Monitoring</div>
+        <h1>Earthquake<span> Watch</span></h1>
+        <p class="ds-masthead-sub">Real-time seismic monitoring and AI-powered magnitude prediction for Indian tectonic zones</p>
+      </div>
+
+      <div class="ds-tabs">
+        <button class="ds-tab-btn active" data-module="eq" data-tab="realtime">📡 Real-time Monitoring</button>
+        <button class="ds-tab-btn" data-module="eq" data-tab="prediction">🤖 AI Prediction</button>
+      </div>
+
+      <div id="eq-realtime-tab" class="ds-tab-content active">
+        <div class="ds-card">
+          <div class="ds-card-title">🔍 Track Location</div>
+          <div class="ds-search-row">
+            <input type="text" class="ds-search-input" id="eq-locationInput" placeholder="e.g. Delhi, Uttarakhand, Himalayan Belt" value="Delhi" style="border-color:#333;"/>
+            <button class="ds-btn-primary" onclick="eq_fetchWeather()">Track Seismic Data</button>
+          </div>
+        </div>
+        <div id="eq-alertContainer"></div>
+        <div id="eq-loadingIndicator" class="ds-loading"><div class="ds-spinner"></div><p>Fetching seismic data...</p></div>
+        <div id="eq-errorContainer"></div>
+        <div class="ds-main-grid" id="eq-dataContainer" style="display:none">
+          <div class="ds-card">
+            <div class="ds-card-title">📊 Current Seismic Parameters</div>
+            <div class="ds-params-grid" id="eq-paramsGrid"></div>
+            <div class="ds-richter-scale" id="eq-richterScale" style="display:none">
+              <div class="ds-richter-label">Simulated Magnitude Indicator</div>
+              <div class="ds-richter-track"><div class="ds-richter-fill" id="eq-richterFill" style="width:0%"></div></div>
+              <div class="ds-richter-ticks"><span>0</span><span>2</span><span>4</span><span>6</span><span>8</span><span>10+</span></div>
+            </div>
+            <div id="eq-riskIndicator"></div>
+          </div>
+          <div class="ds-card">
+            <div class="ds-card-title">🗺️ Location Map</div>
+            <div id="eq-map" class="ds-map"></div>
+          </div>
+        </div>
+        <div class="ds-card" id="eq-usgsCard" style="display:none">
+          <div class="ds-card-title">🌍 Recent USGS Events (Global — Last 24h)</div>
+          <div class="ds-info-banner"><span>ℹ️</span><div><strong>Data Source</strong>Live from USGS Earthquake Hazards Program. Magnitude ≥ 2.5 worldwide.</div></div>
+          <div class="ds-events-list" id="eq-eventsList"><p style="color:var(--ds-text-muted);font-size:13px;">Loading...</p></div>
+        </div>
+      </div>
+
+      <div id="eq-prediction-tab" class="ds-tab-content">
+        <div class="ds-card">
+          <div class="ds-card-title">🤖 AI-Powered Magnitude Prediction</div>
+          <div class="ds-training-status">
+            <div class="ds-model-status"><strong>Model Status</strong><span id="eq-modelStatus">Ready to train</span></div>
+            <div class="ds-progress-wrap" id="eq-trainingProgress">
+              <div class="ds-model-status"><strong>Training Progress</strong></div>
+              <div class="ds-progress-track"><div class="ds-progress-bar" id="eq-progressBar"></div></div>
+            </div>
+            <button class="ds-btn-primary" id="eq-trainBtn">🎯 Train AI Model</button>
+          </div>
+          <div class="ds-input-grid">
+            <div class="ds-input-group"><label>Focal Depth (km)</label><input type="number" id="eq-focalDepth" value="10" step="1" /></div>
+            <div class="ds-input-group"><label>Ground Acceleration (g)</label><input type="number" id="eq-pga" value="0.15" step="0.01" /></div>
+            <div class="ds-input-group"><label>Fault Slip Rate (mm/yr)</label><input type="number" id="eq-slipRate" value="12" step="0.5" /></div>
+            <div class="ds-input-group"><label>Seismic Moment (×10¹⁵ Nm)</label><input type="number" id="eq-seismicMoment" value="5.6" step="0.1" /></div>
+            <div class="ds-input-group"><label>Shear Wave Velocity (m/s)</label><input type="number" id="eq-vs30" value="360" step="10" /></div>
+            <div class="ds-input-group"><label>Strain Rate (10⁻⁹/yr)</label><input type="number" id="eq-strainRate" value="3.2" step="0.1" /></div>
+          </div>
+          <button class="ds-btn-primary" id="eq-predictBtn" style="width:100%;padding:14px;font-size:14px;" disabled>🔮 Predict Earthquake Magnitude</button>
+          <div id="eq-predictionResult" style="display:none"></div>
+        </div>
+      </div>
+
+      <div class="ds-page-footer">
+        <span class="ds-footer-brand">SDRRAS · Earthquake Watch</span>
+        <span class="ds-footer-note">Powered by USGS · OpenWeatherMap · TensorFlow.js · Results are advisory only</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============================================================
+       VIEW: FLOOD
+  ============================================================ -->
+  <div class="view view-disaster" id="view-flood">
+    <nav class="ds-topbar">
+      <div class="ds-topbar-left">
+        <button class="ds-back-btn" onclick="goHome()">← Home</button>
+        <div class="ds-divider-v"></div>
+        <span class="ds-brand">SDRRAS</span>
+      </div>
+      <div class="ds-topbar-right">
+        <div class="ds-live-dot" style="background:#3fc6f0"></div>
+        <span class="ds-live-label" style="color:#3fc6f0">Live Feed</span>
+      </div>
+    </nav>
+
+    <div class="ds-page">
+      <div class="ds-masthead">
+        <div class="ds-masthead-tag">Disaster Monitoring</div>
+        <h1>Flood<span> Watch</span></h1>
+        <p class="ds-masthead-sub">Real-time hydro-meteorological monitoring and AI-powered inundation risk prediction for Indian river basins</p>
+      </div>
+
+      <div class="ds-tabs">
+        <button class="ds-tab-btn active" data-module="fl" data-tab="realtime">📡 Real-time Monitoring</button>
+        <button class="ds-tab-btn" data-module="fl" data-tab="prediction">🤖 AI Prediction</button>
+      </div>
+
+      <div id="fl-realtime-tab" class="ds-tab-content active">
+        <div class="ds-card">
+          <div class="ds-card-title">🔍 Track Location</div>
+          <div class="ds-search-row">
+            <input type="text" class="ds-search-input" id="fl-locationInput" placeholder="e.g. Patna, Assam, Brahmaputra Basin" value="Patna" style="border-color:#333;"/>
+            <button class="ds-btn-primary" onclick="fl_fetchWeather()">Track Flood Data</button>
+          </div>
+        </div>
+        <div id="fl-alertContainer"></div>
+        <div id="fl-loadingIndicator" class="ds-loading"><div class="ds-spinner"></div><p>Fetching hydro-meteorological data...</p></div>
+        <div id="fl-errorContainer"></div>
+        <div class="ds-main-grid" id="fl-dataContainer" style="display:none">
+          <div class="ds-card">
+            <div class="ds-card-title">📊 Current Hydro Parameters</div>
+            <div class="ds-params-grid" id="fl-paramsGrid"></div>
+            <div class="ds-water-gauge" id="fl-waterGauge" style="display:none">
+              <div class="ds-gauge-label">Inundation Risk Index<span id="fl-gaugeValue">—</span></div>
+              <div class="ds-gauge-track"><div class="ds-gauge-fill" id="fl-gaugeFill" style="width:0%"></div></div>
+              <div class="ds-gauge-ticks"><span>Safe</span><span>Watch</span><span>Warning</span><span>Danger</span><span>Extreme</span></div>
+            </div>
+            <div id="fl-riskIndicator"></div>
+          </div>
+          <div class="ds-card">
+            <div class="ds-card-title">🗺️ Location Map</div>
+            <div id="fl-map" class="ds-map"></div>
+          </div>
+        </div>
+        <div class="ds-card" id="fl-feedCard" style="display:none">
+          <div class="ds-card-title">🌊 Live Flood Alert Feed — National Flood Commission</div>
+          <div class="ds-info-banner"><span>💧</span><div><strong>Data Source</strong>Simulated CWC/NDMA bulletin feed based on real Indian river basins.</div></div>
+          <div class="ds-feed-list" id="fl-feedList"></div>
+        </div>
+      </div>
+
+      <div id="fl-prediction-tab" class="ds-tab-content">
+        <div class="ds-card">
+          <div class="ds-card-title">🤖 AI-Powered Flood Inundation Prediction</div>
+          <div class="ds-training-status">
+            <div class="ds-model-status"><strong>Model Status</strong><span id="fl-modelStatus">Ready to train</span></div>
+            <div class="ds-progress-wrap" id="fl-trainingProgress">
+              <div class="ds-model-status"><strong>Training Progress</strong></div>
+              <div class="ds-progress-track"><div class="ds-progress-bar" id="fl-progressBar"></div></div>
+            </div>
+            <button class="ds-btn-primary" id="fl-trainBtn">🎯 Train AI Model</button>
+          </div>
+          <div class="ds-input-grid">
+            <div class="ds-input-group"><label>Rainfall (mm / 24h)</label><input type="number" id="fl-rainfall" value="120" step="1" /></div>
+            <div class="ds-input-group"><label>River Discharge (m³/s)</label><input type="number" id="fl-discharge" value="4500" step="100" /></div>
+            <div class="ds-input-group"><label>Soil Moisture Index (0–1)</label><input type="number" id="fl-soilMoisture" value="0.72" step="0.01" /></div>
+            <div class="ds-input-group"><label>Catchment Area (km²)</label><input type="number" id="fl-catchment" value="8500" step="100" /></div>
+            <div class="ds-input-group"><label>Elevation (m asl)</label><input type="number" id="fl-elevation" value="52" step="1" /></div>
+            <div class="ds-input-group">
+              <label>Land Use Type</label>
+              <select id="fl-landUse">
+                <option value="1">Urban / Impervious</option>
+                <option value="0.7" selected>Agricultural</option>
+                <option value="0.4">Mixed Forest</option>
+                <option value="0.2">Dense Forest</option>
+                <option value="0.9">Bare / Degraded Land</option>
+              </select>
+            </div>
+          </div>
+          <button class="ds-btn-primary" id="fl-predictBtn" style="width:100%;padding:14px;font-size:14px;" disabled>🔮 Predict Flood Inundation Depth (m)</button>
+          <div id="fl-predictionResult" style="display:none"></div>
+        </div>
+      </div>
+
+      <div class="ds-page-footer">
+        <span class="ds-footer-brand">SDRRAS · Flood Watch</span>
+        <span class="ds-footer-note">Powered by OpenWeatherMap · CWC/NDMA Feed · TensorFlow.js · Results are advisory only</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============================================================
+       HOMEPAGE MODALS
+  ============================================================ -->
+  <div class="modal" id="donateModal">
+    <div class="modal-content">
+      <div class="modal-header"><span class="modal-title">💰 Donation Portal</span><span class="close" data-modal="donateModal">&times;</span></div>
+      <div class="modal-body">
+        <p class="info-text">Support disaster relief efforts through secure donations</p>
+        <form id="donateForm">
+          <div class="form-group">
+            <label>Select Amount (₹)</label>
+            <div class="donation-grid">
+              <button type="button" class="amount-btn" data-amount="100">₹100</button>
+              <button type="button" class="amount-btn" data-amount="500">₹500</button>
+              <button type="button" class="amount-btn" data-amount="1000">₹1000</button>
+            </div>
+            <input type="number" id="customAmount" placeholder="Custom amount" class="input-field" style="margin-top:10px" />
+          </div>
+          <div class="form-group">
+            <label>Payment Method</label>
+            <select id="paymentMethod" required>
+              <option value="upi">UPI / GPay / PhonePe</option>
+              <option value="card">Credit / Debit Card</option>
+              <option value="netbanking">Net Banking</option>
+            </select>
+          </div>
+          <button type="submit" class="submit-btn danger">Proceed to Payment</button>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal" id="resourceModal">
+    <div class="modal-content">
+      <div class="modal-header"><span class="modal-title">📦 Resource Request</span><span class="close" data-modal="resourceModal">&times;</span></div>
+      <div class="modal-body">
+        <form id="resourceForm">
+          <div class="form-group">
+            <label>Resource Type</label>
+            <select id="resourceObject" required>
+              <option value="">-- Select Resource --</option>
+              <option value="water">💧 Water Bottles</option>
+              <option value="food">🍲 Food Packets</option>
+              <option value="medicine">💊 Medical Supplies</option>
+              <option value="blankets">🛏️ Blankets</option>
+              <option value="tents">⛺ Emergency Tents</option>
+            </select>
+          </div>
+          <div class="form-group"><label>Quantity Required</label><input type="number" id="resourceQty" value="1" min="1" max="100" /></div>
+          <div class="form-group">
+            <label>Location</label>
+            <select id="resourceArea" required>
+              <option value="">-- Select Location --</option>
+              <option value="Bhopal">Bhopal</option>
+              <option value="Indore">Indore</option>
+              <option value="Jabalpur">Jabalpur</option>
+            </select>
+          </div>
+          <div class="form-group"><label>Contact Number (Optional)</label><input type="tel" id="resourcePhone" placeholder="Enter contact number" /></div>
+          <button type="submit" class="submit-btn">Submit Request</button>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal" id="matchModal">
+    <div class="modal-content">
+      <div class="modal-header"><span class="modal-title">🤝 Request Matching</span><span class="close" data-modal="matchModal">&times;</span></div>
+      <div class="modal-body">
+        <div id="loadingRequests" style="text-align:center;padding:15px;font-weight:600">Loading requests...</div>
+        <div id="requestsList"></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal" id="chatModal">
+    <div class="modal-content">
+      <div class="modal-header"><span class="modal-title">🆘 Emergency Contact</span><span class="close" data-modal="chatModal">&times;</span></div>
+      <div class="modal-body">
+        <div id="stepCategory">
+          <div class="form-group"><label>Select Emergency Type</label></div>
+          <div class="category-grid">
+            <button type="button" class="category-btn" data-category="sos"><span class="cat-icon">🆘</span><span class="cat-label">SOS</span></button>
+            <button type="button" class="category-btn" data-category="medical"><span class="cat-icon">🏥</span><span class="cat-label">Medical</span></button>
+            <button type="button" class="category-btn" data-category="shelter"><span class="cat-icon">🏠</span><span class="cat-label">Shelter</span></button>
+            <button type="button" class="category-btn" data-category="food"><span class="cat-icon">🍲</span><span class="cat-label">Food</span></button>
+          </div>
+        </div>
+        <div class="hidden" id="stepDetails">
+          <form id="emergencyForm">
+            <div class="form-group"><label>Your Location</label><input type="text" id="emergencyArea" placeholder="Enter location" required /></div>
+            <div class="form-group"><label>Contact Number</label><input type="tel" id="emergencyPhone" placeholder="Enter phone number" required /></div>
+            <div class="form-group"><label>Additional Details</label><input type="text" id="emergencyMessage" placeholder="Describe your emergency" /></div>
+            <button type="submit" class="submit-btn danger">Submit Emergency Request</button>
+          </form>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="notification" id="notification"></div>
+
+  <!-- ============================================================
+       SCRIPTS
+  ============================================================ -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.js"></script>
+  <script>
+    const API_KEY = "e6025676cb8e3f1f583152d0b1080f6a";
+
+    /* ── View navigation ─────────────────────────────────────────── */
+    let currentView = "home";
+    const maps = { cy: null, eq: null, fl: null };
+
+    function openDisaster(type) {
+      document.getElementById("view-home").classList.add("hidden");
+      const view = document.getElementById("view-" + type);
+      document.querySelectorAll(".view-disaster").forEach(v => v.classList.remove("active"));
+      view.classList.add("active");
+      currentView = type;
+      // Invalidate map size after transition
+      setTimeout(() => {
+        if (maps[type[0]+type[1]]) maps[type[0]+type[1]].invalidateSize();
+      }, 500);
+    }
+
+    function goHome() {
+      document.querySelectorAll(".view-disaster").forEach(v => v.classList.remove("active"));
+      document.getElementById("view-home").classList.remove("hidden");
+      currentView = "home";
+    }
+
+    /* ── Disaster card clicks ────────────────────────────────────── */
+    document.querySelectorAll(".disaster-module").forEach(card => {
+      card.addEventListener("click", function() {
+        const type = this.dataset.type;
+        if (type === "cyclone")    openDisaster("cyclone");
+        else if (type === "earthquake") openDisaster("earthquake");
+        else if (type === "flood")      openDisaster("flood");
+        else if (type === "fakenews") {
+          window.location.href = "fake-news-checker";
+        }
+      });
+    });
+
+    /* ── Tab switching (shared, module-scoped) ───────────────────── */
+    document.querySelectorAll(".ds-tab-btn").forEach(btn => {
+      btn.addEventListener("click", function() {
+        const mod = this.dataset.module;
+        const tab = this.dataset.tab;
+        document.querySelectorAll(`.ds-tab-btn[data-module="${mod}"]`).forEach(b => b.classList.remove("active"));
+        document.querySelectorAll(`[id^="${mod}-"][id$="-tab"]`).forEach(t => t.classList.remove("active"));
+        this.classList.add("active");
+        document.getElementById(`${mod}-${tab}-tab`).classList.add("active");
+      });
+    });
+
+    /* ── Map helper ──────────────────────────────────────────────── */
+    function initMap(mapId, mapKey, lat, lon, name, emoji) {
+      if (maps[mapKey]) { maps[mapKey].remove(); maps[mapKey] = null; }
+      setTimeout(() => {
+        maps[mapKey] = L.map(mapId, { center: [lat, lon], zoom: 7 });
+        L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+          attribution: "© OpenStreetMap contributors", maxZoom: 19
+        }).addTo(maps[mapKey]);
+        const icon = L.divIcon({
+          className: "custom-icon",
+          html: `<div style="font-size:34px;text-align:center;">${emoji}</div>`,
+          iconSize: [38,38], iconAnchor: [19,19]
+        });
+        L.marker([lat, lon], { icon }).addTo(maps[mapKey])
+          .bindPopup(`<b>${name}</b><br>Monitoring Point`).openPopup();
+        setTimeout(() => maps[mapKey].invalidateSize(), 100);
+      }, 100);
+    }
+
+    /* ── Notification ────────────────────────────────────────────── */
+    const notification = document.getElementById("notification");
+
+    function showNotification(message, isError = false) {
+      notification.textContent = message;
+      notification.className = "notification show" + (isError ? " error" : "");
+      setTimeout(() => notification.classList.remove("show"), 4000);
+    }
+
+    /* ── Modals ──────────────────────────────────────────────────── */
+    function openModal(m) { m.style.display = "block"; }
+    function closeModal(m) { m.style.display = "none"; }
+
+    const chatModal     = document.getElementById("chatModal");
+    const resourceModal = document.getElementById("resourceModal");
+    const matchModal    = document.getElementById("matchModal");
+    const donateModal   = document.getElementById("donateModal");
+
+    document.getElementById("chatBtn").addEventListener("click", () => openModal(chatModal));
+    document.getElementById("openResourceBtn").addEventListener("click", () => openModal(resourceModal));
+    document.getElementById("donateBtn").addEventListener("click", () => openModal(donateModal));
+    document.getElementById("matchBtn").addEventListener("click", () => { openModal(matchModal); fetchRequests(); });
+
+    document.querySelectorAll(".close").forEach(btn => {
+      btn.addEventListener("click", function() {
+        closeModal(document.getElementById(this.dataset.modal));
+      });
+    });
+
+    window.addEventListener("click", e => {
+      if (e.target.classList.contains("modal")) closeModal(e.target);
+    });
+
+    /* ── Dev banner ──────────────────────────────────────────────── */
+    function showDevBanner() {
+      const b = document.getElementById("devBanner");
+      b.style.display = "block";
+      setTimeout(() => b.style.display = "none", 3000);
+    }
+
+    /* ── Resource Requests ───────────────────────────────────────── */
+    const requestsList   = document.getElementById("requestsList");
+    const loadingRequests = document.getElementById("loadingRequests");
+
+    async function fetchRequests() {
+      loadingRequests.style.display = "block";
+      requestsList.innerHTML = "";
+      try {
+        const res  = await fetch("/get-all-requests");
+        const data = await res.json();
+        loadingRequests.style.display = "none";
+        if (data.success && data.requests.length > 0) {
+          data.requests.forEach(req => {
+            const icons = { water:"💧", food:"🍲", medicine:"💊", blanket:"🛏️", tent:"⛺" };
+            const icon  = Object.entries(icons).find(([k]) => req.resource_type.includes(k))?.[1] || "📦";
+            const item  = document.createElement("div");
+            item.className = "request-list-item";
+            item.id = `req-${req.id}`;
+            item.innerHTML = `
+              <div class="request-info">
+                <h4>${icon} ${req.quantity}x ${req.resource_type}</h4>
+                <div class="request-meta">📍 ${req.area} • 📅 ${req.created_at}</div>
+              </div>
+              <button class="fulfill-btn" onclick="fulfillRequest(${req.id})">✅ Fulfill</button>`;
+            requestsList.appendChild(item);
+          });
+        } else {
+          requestsList.innerHTML = '<div class="empty-state">No pending requests found.</div>';
+        }
+      } catch {
+        loadingRequests.style.display = "none";
+        requestsList.innerHTML = '<div class="empty-state" style="color:#c62828">Failed to load requests.</div>';
+      }
+    }
+
+    window.fulfillRequest = async function(id) {
+      if (!confirm("Confirm fulfillment of this resource request?")) return;
+      try {
+        const res  = await fetch("/fulfill-request", { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ request_id: id }) });
+        const data = await res.json();
+        if (data.success) {
+          showNotification("Request fulfilled successfully!");
+          const item = document.getElementById(`req-${id}`);
+          if (item) { item.style.opacity = "0"; setTimeout(() => item.remove(), 300); }
+        } else { showNotification("Error: " + data.error, true); }
+      } catch { showNotification("Network Error", true); }
+    };
+
+    /* Subscribe */
+    document.getElementById("subscribeBtn").addEventListener("click", async () => {
+      const phone = document.getElementById("phoneInput").value.trim();
+      const area  = document.getElementById("areaInputSub").value.trim();
+      if (!phone) { showNotification("Please enter a phone number", true); return; }
+      try {
+        const res  = await fetch("/subscribe", { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ phone, area }) });
+        const data = await res.json();
+        if (res.ok) { showNotification(data.message); document.getElementById("phoneInput").value = ""; document.getElementById("areaInputSub").value = ""; }
+        else { showNotification(data.error || "Failed to subscribe", true); }
+      } catch { showNotification("Network error. Please try again.", true); }
+    });
+
+    /* Emergency form */
+    let currentCategory = "";
+    const stepCategory = document.getElementById("stepCategory");
+    const stepDetails  = document.getElementById("stepDetails");
+
+    document.querySelectorAll(".category-btn").forEach(btn => {
+      btn.addEventListener("click", function() {
+        currentCategory = this.dataset.category;
+        document.querySelectorAll(".category-btn").forEach(b => b.classList.remove("active"));
+        this.classList.add("active");
+        setTimeout(() => { stepCategory.classList.add("hidden"); stepDetails.classList.remove("hidden"); }, 300);
+      });
+    });
+
+    document.getElementById("emergencyForm").addEventListener("submit", async e => {
+      e.preventDefault();
+      const area    = document.getElementById("emergencyArea").value.trim();
+      const phone   = document.getElementById("emergencyPhone").value.trim();
+      const message = document.getElementById("emergencyMessage").value.trim();
+      try {
+        const res  = await fetch("/emergency-request", { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ category: currentCategory, area, phone, message }) });
+        const data = await res.json();
+        if (res.ok) { showNotification("Emergency request submitted! SMS confirmation sent."); closeModal(chatModal); e.target.reset(); stepDetails.classList.add("hidden"); stepCategory.classList.remove("hidden"); }
+        else { showNotification(data.error || "Failed to submit request", true); }
+      } catch { showNotification("Network error. Please try again.", true); }
+    });
+
+    /* Donate form */
+    document.querySelectorAll(".amount-btn").forEach(btn => {
+      btn.addEventListener("click", function() {
+        document.querySelectorAll(".amount-btn").forEach(b => b.classList.remove("selected"));
+        this.classList.add("selected");
+        document.getElementById("customAmount").value = this.dataset.amount;
+      });
+    });
+
+    document.getElementById("customAmount").addEventListener("focus", () => {
+      document.querySelectorAll(".amount-btn").forEach(b => b.classList.remove("selected"));
+    });
+
+    document.getElementById("donateForm").addEventListener("submit", e => {
+      e.preventDefault();
+      const amount = document.getElementById("customAmount").value;
+      const method = document.getElementById("paymentMethod").value;
+      if (!amount || amount <= 0) { showNotification("Please enter a valid amount", true); return; }
+      const btn = e.target.querySelector(".submit-btn");
+      const orig = btn.textContent;
+      btn.textContent = "Processing..."; btn.disabled = true;
+      setTimeout(() => {
+        closeModal(donateModal);
+        showNotification(`Payment of ₹${amount} processed successfully via ${method.toUpperCase()}.`);
+        e.target.reset();
+        document.querySelectorAll(".amount-btn").forEach(b => b.classList.remove("selected"));
+        btn.textContent = orig; btn.disabled = false;
+      }, 1500);
+    });
+
+    document.getElementById("resourceForm").addEventListener("submit", async e => {
+      e.preventDefault();
+      const resource = document.getElementById("resourceObject").value;
+      const quantity = document.getElementById("resourceQty").value;
+      const area     = document.getElementById("resourceArea").value;
+      const phone    = document.getElementById("resourcePhone").value.trim();
+      try {
+        const res  = await fetch("/resource-request", { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ resource, quantity, area, phone }) });
+        const data = await res.json();
+        if (res.ok) { showNotification("Resource request submitted successfully!"); closeModal(resourceModal); e.target.reset(); }
+        else { showNotification(data.error || "Failed to submit request", true); }
+      } catch { showNotification("Network error. Please try again.", true); }
+    });
+
+    /* ================================================================
+       CYCLONE MODULE
+    ================================================================ */
+    let cy_model = null, cy_trained = false;
+
+    function cy_fetchWeather() {
+      const loc     = document.getElementById("cy-locationInput").value.trim();
+      const loader  = document.getElementById("cy-loadingIndicator");
+      const cont    = document.getElementById("cy-dataContainer");
+      const errEl   = document.getElementById("cy-errorContainer");
+      const alertEl = document.getElementById("cy-alertContainer");
+      if (!loc) return;
+      loader.style.display = "block"; cont.style.display = "none";
+      errEl.innerHTML = ""; alertEl.innerHTML = "";
+      fetch(`https://api.openweathermap.org/data/2.5/weather?q=${encodeURIComponent(loc)}&appid=${API_KEY}&units=metric`)
+        .then(r => { if (!r.ok) throw new Error("Location not found."); return r.json(); })
+        .then(data => { loader.style.display = "none"; cy_display(data); })
+        .catch(err => { loader.style.display = "none"; errEl.innerHTML = `<div class="ds-error-message"><strong>Error:</strong> ${err.message}</div>`; });
+    }
+
+    function cy_display(w) {
+      const { coord, main, wind, clouds, name } = w;
+      setTimeout(() => initMap("cy-map", "cy", coord.lat, coord.lon, name, "🌀"), 50);
+      const windKMH = (wind.speed * 3.6).toFixed(1);
+      const risk = (wind.speed > 33 || main.pressure < 980) ? { level:"extreme", text:"🚨 EXTREME RISK — Severe Cyclone Conditions" }
+                 : (wind.speed > 17 || main.pressure < 1000) ? { level:"high", text:"⚠️ HIGH RISK — Cyclonic Conditions" }
+                 : { level:"low", text:"✓ LOW RISK — Normal Conditions" };
+      if (risk.level === "extreme" || risk.level === "high") {
+        document.getElementById("cy-alertContainer").innerHTML = `<div class="ds-alert-banner"><span class="ds-alert-icon">⚠️</span><div><strong>Cyclone Alert</strong><p>Severe weather conditions detected in ${name}. Take necessary precautions.</p></div></div>`;
+      }
+      document.getElementById("cy-paramsGrid").innerHTML = [
+        ["Wind Speed",windKMH,"km/h"],["Pressure",main.pressure,"hPa"],
+        ["Temperature",main.temp.toFixed(1),"°C"],["Humidity",main.humidity,"%"],
+        ["Wind Dir",wind.deg,"°"],["Cloud Cover",clouds.all,"%"],
+        ["Visibility",(w.visibility/1000).toFixed(1),"km"],["Feels Like",main.feels_like.toFixed(1),"°C"],
+      ].map(([l,v,u]) => `<div class="ds-param-box" style="border-left-color:#3498db"><div class="ds-param-label">${l}</div><div class="ds-param-value">${v}<span class="ds-param-unit">${u}</span></div></div>`).join("");
+      document.getElementById("cy-riskIndicator").innerHTML = `<div class="ds-risk-indicator ds-risk-${risk.level}">${risk.text}</div>`;
+      document.getElementById("cy-dataContainer").style.display = "grid";
+    }
+
+    document.getElementById("cy-trainBtn").addEventListener("click", async function() {
+      this.disabled = true; this.textContent = "Training...";
+      document.getElementById("cy-modelStatus").textContent = "Training in progress...";
+      document.getElementById("cy-trainingProgress").style.display = "block";
+      const n=1000, inp=[], out=[];
+      for (let i=0;i<n;i++) {
+        const sst=26+Math.random()*7,p=950+Math.random()*70,ws=20+Math.random()*120,h=60+Math.random()*35,sh=2+Math.random()*18,v=5+Math.random()*30;
+        inp.push([sst,p,ws,h,sh,v]);
+        let int=ws+(sst-26.5)*8-(p-1000)*0.3+(h-75)*0.4-sh*2+v*1.5+(Math.random()-0.5)*10;
+        out.push([Math.max(20,Math.min(200,int))]);
+      }
+      cy_model = tf.sequential({ layers:[
+        tf.layers.dense({inputShape:[6],units:32,activation:"relu"}),
+        tf.layers.dropout({rate:0.2}),
+        tf.layers.dense({units:16,activation:"relu"}),
+        tf.layers.dense({units:1,activation:"linear"}),
+      ]});
+      cy_model.compile({optimizer:tf.train.adam(0.01),loss:"meanSquaredError",metrics:["mae"]});
+      await cy_model.fit(tf.tensor2d(inp),tf.tensor2d(out),{epochs:50,batchSize:32,validationSplit:0.2,callbacks:{onEpochEnd:(e)=>{
+        document.getElementById("cy-progressBar").style.width=(((e+1)/50)*100).toFixed(0)+"%";
+      }}});
+      cy_trained = true;
+      document.getElementById("cy-modelStatus").textContent = "Model trained successfully ✓";
+      this.textContent = "✓ Trained";
+      document.getElementById("cy-predictBtn").disabled = false;
+    });
+
+    document.getElementById("cy-predictBtn").addEventListener("click", async function() {
+      if (!cy_trained) { alert("Please train the model first!"); return; }
+      const sst=parseFloat(document.getElementById("cy-sst").value);
+      const pressure=parseFloat(document.getElementById("cy-pressure").value);
+      const windSpeed=parseFloat(document.getElementById("cy-windSpeed").value);
+      const humidity=parseFloat(document.getElementById("cy-humidity").value);
+      const windShear=parseFloat(document.getElementById("cy-windShear").value);
+      const vorticity=parseFloat(document.getElementById("cy-vorticity").value);
+      const t=tf.tensor2d([[sst,pressure,windSpeed,humidity,windShear,vorticity]]);
+      const pred=cy_model.predict(t);
+      const intensity=(await pred.data())[0];
+      let category,risk,bg;
+      if(intensity<63){category="Tropical Depression";risk="Low";bg="linear-gradient(135deg,#0d2b1a,#1a5c38)";}
+      else if(intensity<88){category="Tropical Storm";risk="Medium";bg="linear-gradient(135deg,#2b1a00,#6b4400)";}
+      else if(intensity<118){category="Category 1 Cyclone";risk="High";bg="linear-gradient(135deg,#2b1000,#7a3800)";}
+      else if(intensity<153){category="Category 2–3 Cyclone";risk="Very High";bg="linear-gradient(135deg,#2b0808,#8b1a1a)";}
+      else{category="Category 4–5 Cyclone";risk="Extreme";bg="linear-gradient(135deg,#1a0000,#5c0000)";}
+      const advisories={
+        "Tropical Depression":"Monitor weather updates. Prepare emergency supplies. Avoid coastal areas.",
+        "Tropical Storm":"Stay indoors. Secure loose objects. Stock up on essential supplies.",
+        "Category 1 Cyclone":"Evacuate if advised. Board up windows. Move to higher ground.",
+        "Category 2–3 Cyclone":"IMMEDIATE EVACUATION REQUIRED. Seek sturdy shelter. Life-threatening conditions expected.",
+        "Category 4–5 Cyclone":"EXTREME DANGER. Complete evacuation mandatory. Catastrophic damage expected.",
+      };
+      document.getElementById("cy-predictionResult").style.display="block";
+      document.getElementById("cy-predictionResult").innerHTML=`<div class="ds-prediction-result" style="background:${bg}"><h3>24-Hour Prediction</h3><div class="ds-pred-value">${intensity.toFixed(1)}</div><div class="ds-pred-unit">km / h</div><div class="ds-pred-category">${category}</div><div class="ds-pred-risk">Risk Level: ${risk}</div><div class="ds-pred-details"><div class="ds-detail-box"><div class="ds-detail-label">SST</div><div class="ds-detail-value">${sst}°C</div></div><div class="ds-detail-box"><div class="ds-detail-label">Pressure</div><div class="ds-detail-value">${pressure} hPa</div></div><div class="ds-detail-box"><div class="ds-detail-label">Wind</div><div class="ds-detail-value">${windSpeed} km/h</div></div><div class="ds-detail-box"><div class="ds-detail-label">Humidity</div><div class="ds-detail-value">${humidity}%</div></div><div class="ds-detail-box"><div class="ds-detail-label">Wind Shear</div><div class="ds-detail-value">${windShear} m/s</div></div><div class="ds-detail-box"><div class="ds-detail-label">Vorticity</div><div class="ds-detail-value">${vorticity}</div></div></div><div class="ds-safety-advisory"><strong>⚠ Safety Advisory</strong>${advisories[category]}</div></div>`;
+      t.dispose(); pred.dispose();
+    });
+
+    /* ================================================================
+       EARTHQUAKE MODULE
+    ================================================================ */
+    let eq_model = null, eq_trained = false;
+
+    function eq_fetchWeather() {
+      const loc     = document.getElementById("eq-locationInput").value.trim();
+      const loader  = document.getElementById("eq-loadingIndicator");
+      const cont    = document.getElementById("eq-dataContainer");
+      const errEl   = document.getElementById("eq-errorContainer");
+      const alertEl = document.getElementById("eq-alertContainer");
+      if (!loc) return;
+      loader.style.display = "block"; cont.style.display = "none";
+      errEl.innerHTML = ""; alertEl.innerHTML = "";
+      fetch(`https://api.openweathermap.org/data/2.5/weather?q=${encodeURIComponent(loc)}&appid=${API_KEY}&units=metric`)
+        .then(r => { if (!r.ok) throw new Error("Location not found."); return r.json(); })
+        .then(data => { loader.style.display = "none"; eq_display(data); eq_fetchUSGS(); })
+        .catch(err => { loader.style.display = "none"; errEl.innerHTML = `<div class="ds-error-message"><strong>Error:</strong> ${err.message}</div>`; });
+    }
+
+    function eq_display(w) {
+      const { coord, main, wind, clouds, name } = w;
+      setTimeout(() => initMap("eq-map","eq",coord.lat,coord.lon,name,"🔴"), 50);
+      const stressProxy = Math.abs(1013-main.pressure) + main.humidity*0.1;
+      const risk = stressProxy>40 ? {level:"extreme",text:"🚨 EXTREME RISK — Severe Seismic Activity"}
+                 : stressProxy>25 ? {level:"high",   text:"⚠️ HIGH RISK — Elevated Seismic Conditions"}
+                 : stressProxy>12 ? {level:"medium", text:"⚡ MEDIUM RISK — Moderate Ground Stress"}
+                 : {level:"low", text:"✓ LOW RISK — Stable Ground Conditions"};
+      const simMag = (Math.abs(1013-main.pressure)/10 + main.humidity*0.02 + Math.random()*0.5).toFixed(1);
+      const magNum = parseFloat(simMag);
+      if (risk.level==="extreme"||risk.level==="high") {
+        document.getElementById("eq-alertContainer").innerHTML = `<div class="ds-alert-banner"><span class="ds-alert-icon">🚨</span><div><strong>Seismic Alert</strong><p>Elevated tectonic stress indicators detected near ${name}.</p></div></div>`;
+      }
+      document.getElementById("eq-paramsGrid").innerHTML = [
+        ["Elevation Proxy",(main.pressure/101.325).toFixed(2),"atm"],["Atm. Pressure",main.pressure,"hPa"],
+        ["Temperature",main.temp.toFixed(1),"°C"],["Humidity",main.humidity,"%"],
+        ["Ground Wind",(wind.speed*3.6).toFixed(1),"km/h"],["Cloud Cover",clouds.all,"%"],
+        ["Visibility",(w.visibility/1000).toFixed(1),"km"],["Sim. Magnitude",simMag,"M"],
+      ].map(([l,v,u])=>`<div class="ds-param-box" style="border-left-color:#e67e22"><div class="ds-param-label">${l}</div><div class="ds-param-value">${v}<span class="ds-param-unit">${u}</span></div></div>`).join("");
+      const richterPct = Math.min((magNum/10)*100,100).toFixed(1);
+      const rCol = magNum<2?"#4fd98e":magNum<4?"#e8d5b0":magNum<6?"#f0a830":magNum<7?"#f09050":"#e05c4a";
+      const rf = document.getElementById("eq-richterFill");
+      rf.style.width = richterPct+"%"; rf.style.background = rCol;
+      document.getElementById("eq-richterScale").style.display = "block";
+      document.getElementById("eq-riskIndicator").innerHTML = `<div class="ds-risk-indicator ds-risk-${risk.level}">${risk.text}</div>`;
+      document.getElementById("eq-dataContainer").style.display = "grid";
+    }
+
+    async function eq_fetchUSGS() {
+      const card = document.getElementById("eq-usgsCard");
+      const list = document.getElementById("eq-eventsList");
+      card.style.display = "block";
+      try {
+        const res  = await fetch("https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/2.5_day.geojson");
+        const json = await res.json();
+        const events = json.features.slice(0,8);
+        if (!events.length) { list.innerHTML=`<p style="color:var(--ds-text-muted);font-size:13px;">No recent M2.5+ events.</p>`; return; }
+        const cls = m => m<2?"ds-mag-minor":m<4?"ds-mag-light":m<5?"ds-mag-moderate":m<6?"ds-mag-strong":"ds-mag-major";
+        list.innerHTML = events.map(e => {
+          const p   = e.properties;
+          const mag = p.mag!=null?p.mag.toFixed(1):"—";
+          const time= new Date(p.time).toUTCString().replace(" GMT",""+" UTC");
+          const depth=e.geometry.coordinates[2]!=null?e.geometry.coordinates[2].toFixed(1)+" km":"N/A";
+          return `<div class="ds-event-item"><div class="ds-event-mag ${cls(p.mag)}">M${mag}</div><div class="ds-event-info"><div class="ds-event-place">${p.place||"Unknown"}</div><div class="ds-event-time">${time}</div></div><div class="ds-event-depth">${depth}</div></div>`;
+        }).join("");
+      } catch { list.innerHTML=`<p style="color:var(--ds-text-muted);font-size:13px;">Could not load USGS data.</p>`; }
+    }
+
+    document.getElementById("eq-trainBtn").addEventListener("click", async function() {
+      this.disabled=true; this.textContent="Training...";
+      document.getElementById("eq-modelStatus").textContent="Training in progress...";
+      document.getElementById("eq-trainingProgress").style.display="block";
+      const n=1000,inp=[],out=[];
+      for(let i=0;i<n;i++){
+        const fd=1+Math.random()*699,pga=0.01+Math.random()*1.99,sr=Math.random()*100,sm=Math.random()*100,vs=100+Math.random()*1400,str=Math.random()*20;
+        inp.push([fd,pga,sr,sm,vs,str]);
+        let mag=2.5+Math.log10(sm+1)*1.2+pga*1.8+sr*0.02-fd*0.003+str*0.15+(Math.random()-0.5)*0.8;
+        out.push([Math.max(1.0,Math.min(9.5,mag))]);
+      }
+      eq_model=tf.sequential({layers:[tf.layers.dense({inputShape:[6],units:32,activation:"relu"}),tf.layers.dropout({rate:0.2}),tf.layers.dense({units:16,activation:"relu"}),tf.layers.dense({units:1,activation:"linear"})]});
+      eq_model.compile({optimizer:tf.train.adam(0.01),loss:"meanSquaredError",metrics:["mae"]});
+      await eq_model.fit(tf.tensor2d(inp),tf.tensor2d(out),{epochs:50,batchSize:32,validationSplit:0.2,callbacks:{onEpochEnd:(e)=>{document.getElementById("eq-progressBar").style.width=(((e+1)/50)*100).toFixed(0)+"%";}}});
+      eq_trained=true; document.getElementById("eq-modelStatus").textContent="Model trained successfully ✓"; this.textContent="✓ Trained"; document.getElementById("eq-predictBtn").disabled=false;
+    });
+
+    document.getElementById("eq-predictBtn").addEventListener("click", async function() {
+      if (!eq_trained){alert("Please train the model first!");return;}
+      const fd=parseFloat(document.getElementById("eq-focalDepth").value);
+      const pga=parseFloat(document.getElementById("eq-pga").value);
+      const sr=parseFloat(document.getElementById("eq-slipRate").value);
+      const sm=parseFloat(document.getElementById("eq-seismicMoment").value);
+      const vs=parseFloat(document.getElementById("eq-vs30").value);
+      const str=parseFloat(document.getElementById("eq-strainRate").value);
+      const t=tf.tensor2d([[fd,pga,sr,sm,vs,str]]);
+      const pred=eq_model.predict(t);
+      const mag=parseFloat((await pred.data())[0].toFixed(2));
+      let category,risk,bg;
+      if(mag<2){category="Micro";risk="Negligible";bg="linear-gradient(135deg,#0a1a0f,#13401f)";}
+      else if(mag<4){category="Minor Earthquake";risk="Low";bg="linear-gradient(135deg,#0d2b1a,#1a5c38)";}
+      else if(mag<5){category="Light Earthquake";risk="Moderate";bg="linear-gradient(135deg,#2b1a00,#6b4400)";}
+      else if(mag<6){category="Moderate Earthquake";risk="High";bg="linear-gradient(135deg,#2b1000,#7a3800)";}
+      else if(mag<7){category="Strong Earthquake";risk="Very High";bg="linear-gradient(135deg,#2b0808,#8b1a1a)";}
+      else if(mag<8){category="Major Earthquake";risk="Extreme";bg="linear-gradient(135deg,#1a0000,#5c0000)";}
+      else{category="Great Earthquake";risk="Catastrophic";bg="linear-gradient(135deg,#0d0000,#3a0000)";}
+      const adv={"Micro":"No action required.","Minor Earthquake":"Felt by few. Stay alert.","Light Earthquake":"Felt by many. Secure loose objects.","Moderate Earthquake":"Strong shaking. Drop, Cover, Hold On. Expect aftershocks.","Strong Earthquake":"TAKE COVER. Significant structural damage expected.","Major Earthquake":"SEVERE DANGER. Evacuate to open ground.","Great Earthquake":"CATASTROPHIC. Full evacuation mandatory. Tsunami risk near coast."};
+      document.getElementById("eq-predictionResult").style.display="block";
+      document.getElementById("eq-predictionResult").innerHTML=`<div class="ds-prediction-result" style="background:${bg}"><h3>Predicted Magnitude</h3><div class="ds-pred-value">${mag.toFixed(1)}</div><div class="ds-pred-unit">Richter / Moment Magnitude</div><div class="ds-pred-category">${category}</div><div class="ds-pred-risk">Risk Level: ${risk}</div><div class="ds-pred-details"><div class="ds-detail-box"><div class="ds-detail-label">Focal Depth</div><div class="ds-detail-value">${fd} km</div></div><div class="ds-detail-box"><div class="ds-detail-label">PGA</div><div class="ds-detail-value">${pga} g</div></div><div class="ds-detail-box"><div class="ds-detail-label">Slip Rate</div><div class="ds-detail-value">${sr} mm/yr</div></div><div class="ds-detail-box"><div class="ds-detail-label">Seis. Moment</div><div class="ds-detail-value">${sm}×10¹⁵</div></div><div class="ds-detail-box"><div class="ds-detail-label">Vs30</div><div class="ds-detail-value">${vs} m/s</div></div><div class="ds-detail-box"><div class="ds-detail-label">Strain Rate</div><div class="ds-detail-value">${str}×10⁻⁹</div></div></div><div class="ds-safety-advisory"><strong>⚠ Safety Advisory</strong>${adv[category]}</div></div>`;
+      t.dispose(); pred.dispose();
+    });
+
+    /* ================================================================
+       FLOOD MODULE
+    ================================================================ */
+    let fl_model = null, fl_trained = false;
+
+    function fl_fetchWeather() {
+      const loc     = document.getElementById("fl-locationInput").value.trim();
+      const loader  = document.getElementById("fl-loadingIndicator");
+      const cont    = document.getElementById("fl-dataContainer");
+      const errEl   = document.getElementById("fl-errorContainer");
+      const alertEl = document.getElementById("fl-alertContainer");
+      if (!loc) return;
+      loader.style.display = "block"; cont.style.display = "none";
+      errEl.innerHTML = ""; alertEl.innerHTML = "";
+      fetch(`https://api.openweathermap.org/data/2.5/weather?q=${encodeURIComponent(loc)}&appid=${API_KEY}&units=metric`)
+        .then(r => { if (!r.ok) throw new Error("Location not found."); return r.json(); })
+        .then(data => { loader.style.display = "none"; fl_display(data); fl_generateFeed(data.name); })
+        .catch(err => { loader.style.display = "none"; errEl.innerHTML = `<div class="ds-error-message"><strong>Error:</strong> ${err.message}</div>`; });
+    }
+
+    function fl_display(w) {
+      const { coord, main, wind, clouds, rain, name } = w;
+      setTimeout(() => initMap("fl-map","fl",coord.lat,coord.lon,name,"🌊"), 50);
+      const rain1h = (rain&&rain["1h"])?rain["1h"]:0;
+      const riskScore = (main.humidity/100)*40 + rain1h*3 + Math.max(0,1013-main.pressure)*0.5;
+      const risk = riskScore>60?{level:"extreme",text:"🚨 EXTREME RISK — Imminent Flood Conditions"}
+                 : riskScore>35?{level:"high",   text:"⚠️ HIGH RISK — Severe Flooding Likely"}
+                 : riskScore>15?{level:"medium", text:"💧 MEDIUM RISK — Flood Watch Active"}
+                 : {level:"low",text:"✓ LOW RISK — Normal Hydrological Conditions"};
+      const riskPct = Math.min(riskScore/80*100,100).toFixed(0);
+      if (risk.level==="extreme"||risk.level==="high") {
+        document.getElementById("fl-alertContainer").innerHTML = `<div class="ds-alert-banner"><span class="ds-alert-icon">🌊</span><div><strong>Flood Alert</strong><p>High precipitation levels detected near ${name}. Monitor CWC river gauges.</p></div></div>`;
+      }
+      const runoff  = ((main.humidity/100)*rain1h*0.75).toFixed(1);
+      const disEst  = (rain1h*150+main.humidity*2).toFixed(0);
+      document.getElementById("fl-paramsGrid").innerHTML = [
+        ["Rainfall (1h)",rain1h.toFixed(1),"mm"],["Humidity",main.humidity,"%"],
+        ["Temperature",main.temp.toFixed(1),"°C"],["Atm. Pressure",main.pressure,"hPa"],
+        ["Wind Speed",(wind.speed*3.6).toFixed(1),"km/h"],["Cloud Cover",clouds.all,"%"],
+        ["Est. Runoff",runoff,"mm"],["Est. Discharge",disEst,"m³/s"],
+      ].map(([l,v,u])=>`<div class="ds-param-box" style="border-left-color:#2980b9"><div class="ds-param-label">${l}</div><div class="ds-param-value">${v}<span class="ds-param-unit">${u}</span></div></div>`).join("");
+      const gf = document.getElementById("fl-gaugeFill");
+      const gCol = parseFloat(riskPct)<25?"linear-gradient(90deg,#27ae60,#4fd98e)":parseFloat(riskPct)<50?"linear-gradient(90deg,#d4891a,#f0a830)":parseFloat(riskPct)<75?"linear-gradient(90deg,#2980b9,#3fc6f0)":"linear-gradient(90deg,#c0392b,#e05c4a)";
+      gf.style.width=riskPct+"%"; gf.style.background=gCol;
+      document.getElementById("fl-gaugeValue").textContent=riskPct+" / 100";
+      document.getElementById("fl-waterGauge").style.display="block";
+      document.getElementById("fl-riskIndicator").innerHTML=`<div class="ds-risk-indicator ds-risk-${risk.level}">${risk.text}</div>`;
+      document.getElementById("fl-dataContainer").style.display="grid";
+    }
+
+    function fl_generateFeed(locationName) {
+      document.getElementById("fl-feedCard").style.display="block";
+      const bulletins=[
+        {river:"Ganga at Patna",level:"Warning",sev:"severe",gauge:"63.42 m",threshold:"60.10 m",trend:"Rising ↑"},
+        {river:"Brahmaputra at Guwahati",level:"Danger",sev:"extreme",gauge:"89.15 m",threshold:"85.00 m",trend:"Rising ↑↑"},
+        {river:"Kosi at Birpur",level:"Warning",sev:"severe",gauge:"48.30 m",threshold:"45.80 m",trend:"Steady →"},
+        {river:"Yamuna at Delhi",level:"Watch",sev:"moderate",gauge:"204.50 m",threshold:"204.83 m",trend:"Rising ↑"},
+        {river:"Mahanadi at Mundali",level:"Normal",sev:"minor",gauge:"15.20 m",threshold:"22.00 m",trend:"Falling ↓"},
+        {river:locationName+" basin",level:"Watch",sev:"moderate",gauge:"—",threshold:"—",trend:"Monitoring"},
+      ];
+      const sevCls={minor:"ds-sev-minor",moderate:"ds-sev-moderate",severe:"ds-sev-severe",extreme:"ds-sev-extreme"};
+      const now = new Date().toUTCString().replace(" GMT",""+" UTC");
+      document.getElementById("fl-feedList").innerHTML = bulletins.map(b=>`<div class="ds-feed-item"><div class="ds-feed-severity ${sevCls[b.sev]}">${b.level}</div><div class="ds-feed-info"><div class="ds-feed-title">${b.river} — Gauge: <strong>${b.gauge}</strong> | Threshold: ${b.threshold}</div><div class="ds-feed-meta">${now} · Trend: ${b.trend}</div></div></div>`).join("");
+    }
+
+    document.getElementById("fl-trainBtn").addEventListener("click", async function() {
+      this.disabled=true; this.textContent="Training...";
+      document.getElementById("fl-modelStatus").textContent="Training in progress...";
+      document.getElementById("fl-trainingProgress").style.display="block";
+      const n=1000,inp=[],out=[];
+      for(let i=0;i<n;i++){
+        const rf=Math.random()*1000,dis=Math.random()*50000,sm=Math.random(),ca=100+Math.random()*99900,el=Math.random()*5000,lu=0.1+Math.random()*0.9;
+        inp.push([rf,dis,sm,ca,el,lu]);
+        let depth=(rf*lu*sm*0.005)+(dis/10000)+(sm*2)-(el*0.002)+(lu*1.5)+(Math.random()-0.5)*0.5;
+        out.push([Math.max(0,Math.min(15,depth))]);
+      }
+      fl_model=tf.sequential({layers:[tf.layers.dense({inputShape:[6],units:32,activation:"relu"}),tf.layers.dropout({rate:0.2}),tf.layers.dense({units:16,activation:"relu"}),tf.layers.dense({units:1,activation:"linear"})]});
+      fl_model.compile({optimizer:tf.train.adam(0.01),loss:"meanSquaredError",metrics:["mae"]});
+      await fl_model.fit(tf.tensor2d(inp),tf.tensor2d(out),{epochs:50,batchSize:32,validationSplit:0.2,callbacks:{onEpochEnd:(e)=>{document.getElementById("fl-progressBar").style.width=(((e+1)/50)*100).toFixed(0)+"%";}}});
+      fl_trained=true; document.getElementById("fl-modelStatus").textContent="Model trained successfully ✓"; this.textContent="✓ Trained"; document.getElementById("fl-predictBtn").disabled=false;
+    });
+
+    document.getElementById("fl-predictBtn").addEventListener("click", async function() {
+      if(!fl_trained){alert("Please train the model first!");return;}
+      const rf=parseFloat(document.getElementById("fl-rainfall").value);
+      const dis=parseFloat(document.getElementById("fl-discharge").value);
+      const sm=parseFloat(document.getElementById("fl-soilMoisture").value);
+      const ca=parseFloat(document.getElementById("fl-catchment").value);
+      const el=parseFloat(document.getElementById("fl-elevation").value);
+      const lu=parseFloat(document.getElementById("fl-landUse").value);
+      const luLabel=document.getElementById("fl-landUse").options[document.getElementById("fl-landUse").selectedIndex].text;
+      const t=tf.tensor2d([[rf,dis,sm,ca,el,lu]]);
+      const pred=fl_model.predict(t);
+      const depth=parseFloat((await pred.data())[0].toFixed(2));
+      let category,risk,bg;
+      if(depth<0.3){category="No Significant Flooding";risk="Negligible";bg="linear-gradient(135deg,#0a1a0f,#13401f)";}
+      else if(depth<1){category="Minor Flood";risk="Low";bg="linear-gradient(135deg,#0d2b1a,#1a5c38)";}
+      else if(depth<2.5){category="Moderate Flood";risk="Medium";bg="linear-gradient(135deg,#0a1828,#0f3a5c)";}
+      else if(depth<5){category="Severe Flood";risk="High";bg="linear-gradient(135deg,#2b1000,#7a3800)";}
+      else if(depth<8){category="Extreme Flood";risk="Very High";bg="linear-gradient(135deg,#2b0808,#8b1a1a)";}
+      else{category="Catastrophic Flood";risk="Catastrophic";bg="linear-gradient(135deg,#1a0000,#5c0000)";}
+      const adv={"No Significant Flooding":"Normal conditions. No immediate action required.","Minor Flood":"Low-lying areas may waterlog. Monitor updates.","Moderate Flood":"Significant inundation expected. Move to higher floors. Avoid river banks.","Severe Flood":"EVACUATE LOW-LYING AREAS. Do not drive through flooded roads.","Extreme Flood":"IMMEDIATE EVACUATION MANDATORY. Contact NDRF: 011-24363260.","Catastrophic Flood":"CATASTROPHIC INUNDATION. Contact NDMA: 1078. Aerial rescue may be required."};
+      document.getElementById("fl-predictionResult").style.display="block";
+      document.getElementById("fl-predictionResult").innerHTML=`<div class="ds-prediction-result" style="background:${bg}"><h3>Predicted Inundation Depth</h3><div class="ds-pred-value">${depth.toFixed(2)}</div><div class="ds-pred-unit">Metres above ground level</div><div class="ds-pred-category">${category}</div><div class="ds-pred-risk">Risk Level: ${risk}</div><div class="ds-pred-details"><div class="ds-detail-box"><div class="ds-detail-label">Rainfall</div><div class="ds-detail-value">${rf} mm</div></div><div class="ds-detail-box"><div class="ds-detail-label">Discharge</div><div class="ds-detail-value">${dis.toLocaleString()} m³/s</div></div><div class="ds-detail-box"><div class="ds-detail-label">Soil Moisture</div><div class="ds-detail-value">${(sm*100).toFixed(0)}%</div></div><div class="ds-detail-box"><div class="ds-detail-label">Catchment</div><div class="ds-detail-value">${ca.toLocaleString()} km²</div></div><div class="ds-detail-box"><div class="ds-detail-label">Elevation</div><div class="ds-detail-value">${el} m</div></div><div class="ds-detail-box"><div class="ds-detail-label">Land Use</div><div class="ds-detail-value" style="font-size:12px;">${luLabel}</div></div></div><div class="ds-safety-advisory"><strong>⚠ Safety Advisory</strong>${adv[category]}</div></div>`;
+      t.dispose(); pred.dispose();
+    });
+  </script>
+</body>
+</html>
