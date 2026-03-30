@@ -1,0 +1,2 @@
+python crate_database.py
+python app.py
